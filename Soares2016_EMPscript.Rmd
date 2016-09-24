@@ -1,0 +1,238 @@
+---
+title: "Host-specific profiles and highly diversified microbial dark matter in marine sponge symbiont communities"
+subtitle: "R scripts used to generate figures in the paper"
+
+author: "André Soares <br> <sub> Email: ans74@aber.ac.uk <sub>"
+
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Based on EMP 2012 outputs from [Thomas *et al.* (2016)](http://www.nature.com/articles/ncomms11870).
+
+This script had significant inputs from Lucas Moitinho-Silva (UNSW, Australia).
+
+#1. Importing data into R
+
+```{r, eval=FALSE, warning=FALSE}
+#set working directory
+setwd("~Desktop/EMP12.v24_final")
+
+#load picante
+library(picante)
+library(pheatmap)
+library(tidyr)
+library(ggplot2)
+library(stringr)
+library(reshape)
+library(RColorBrewer)
+
+#import EMP Dataset
+#Used Linux CLI tool 'cut' to remove columns 'label' and 'numOtus'.
+ALG <- read.table(file.choose(~Desktop/EMP12.v24_final/P1_forR.shared), header = TRUE, row.names = 1)
+
+#Quick check on the integrity of the OTU table
+class(ALG)
+dim(ALG)
+rownames(ALG)
+head(colnames(ALG))
+
+#Total number of reads in each sample
+apply(ALG,1,sum)
+
+#Importing the  metadata file into the R console
+#SCIE_NAME is the taxonomical ID of sponges in metadata.
+metadata <- read.table(file.choose(~Desktop/EMP12.v24_final/ALG_metadata.tsv), header = TRUE, row.names = 1, sep='\t')
+
+#Sorting rows in “ALG” to match the row order of “metadata”
+ALG <- ALG[rownames(metadata), ]
+#Check to make sure the row names for each file match.
+all.equal(rownames(ALG), rownames(metadata))
+
+#Defining Standard Error
+se<-function(x) sqrt(var(x)/length(x))
+```
+
+#2. Alpha-diversity analysis
+
+###2a. **Figure 1** - Inter-sample rarefaction curves.
+```{r, eval=FALSE, warning=FALSE}
+#From mothur v1.31.2
+#rarefaction.shared(shared=EMP12_ALG_P1.shared, design=ALG_EMP12_groups.design, iters=1500)
+#Output is EMP12_ALG_P1.groups_per_sample.rarefaction
+
+rare=read.table("EMP12_ALG_P1.groups_per_sample.rarefaction", stringsAsFactors=F, header=T)
+cols_methods=c()
+for (i in c(1:ncol(rare))){
+  if (str_split(colnames(rare)[i],"method")[[1]][1] == "") {cols_methods=append(cols_methods,1)}}
+
+rare_0=rare[,2:ncol(rare)]
+rare_0[is.na(rare_0)]=0
+yl=seq(from=min(rare_0), to=max(rare_0), length.out=nrow(rare)) #ylim
+
+num_of_samps=(ncol(rare)-1)/3
+
+#Colors
+ncol=num_of_samps
+cols <- RColorBrewer:::brewer.pal(ncol,"Set2")  # OR c("purple","white","orange")  
+rampcols <- colorRampPalette(colors = cols, space="Lab")(ncol)
+
+colors=data.frame(c("0"), rampcols, stringsAsFactors=FALSE)
+
+pdf("RareF_ALG_P2.pdf")
+plot(rare[,1], yl, type="n", ylab="OTUs", xlab= "Samples")
+list_of_columns=seq(from=2, to=ncol(rare), by=3)
+col=0
+
+for (i in list_of_columns){
+  col=col+1  
+  species= str_split(colnames(rare)[i],"03.")[[1]][2]
+  a=rare[,i:(i+2)]
+  lines(rare[,1], a[,1], col=colors[col,2], lwd=6) 
+  #Plotting the error
+  polygon(c(rev(rare[,1]), rare[,1]), c(rev(a[,2]), (a[,3])), col=colors[col,2], density=60, lty="dashed", border = NA)
+  colors[col,1] = species
+}
+legend(9000, 140, title="Species", colors[1:col,1], fill=colors[,2], horiz=F, cex=0.7) 
+dev.off()
+```
+
+###2b. **Figure 2** - Richness vs. Chao1 estimated richness.
+
+```{r, eval=FALSE, warning=FALSE}
+#Generating Obs_vs_Est_Richness table with vegan's estimateR function
+est.plot<-estimateR(ALG)
+nomes= colnames(est.plot)
+est.plot.inv=t(est.plot)
+rownames(est.plot.inv)= nomes
+est.plot_df<-as.data.frame(est.plot.inv)
+media=aggregate(cbind(S.obs=est.plot_df$S.obs, S.chao1=est.plot_df$S.chao1,  se.chao1=est.plot_df$se.chao1), by=list(metadata$SCIE_NAME), mean)
+media_se=aggregate(cbind(se.obs=est.plot_df$S.obs), by=list(metadata$SCIE_NAME), se)
+agg_media=c(row.names=media$row.names, S.obs=media$S.obs, se.obs=media_se$se.obs, S.chao1=media$S.chao1, se.chao1=media$se.chao1)
+agg_media=merge(media, media_se)
+agg_media <- agg_media[c("Group.1", "S.obs", "se.obs", "S.chao1", "se.chao1")]
+write.csv(agg_media, file="Obs_vs_Est_Richness.csv")
+
+#plot with ggplot2
+mdat <- gather(agg_media, S, value, -Group.1)
+mdat <- separate(mdat, S, c("type","var"))
+mdat <- spread(mdat, type, value)
+mdat <- transform(mdat, var = relevel(factor(var), "obs"))
+
+blue.bold.italic.16.text <- element_text(color = "black", size = 13)
+red.bold.italic.text.x <- element_text(face = "bold", color = "black", size=16, vjust=0)
+red.bold.italic.text.y <- element_text(face = "bold", color = "black", size=16, vjust=1)
+
+g<-ggplot(mdat, aes(x = Group.1, y = S, fill = var))+
+  geom_bar(position = "dodge", stat = "identity") +
+  geom_errorbar(mapping = aes(ymax = S + se, ymin = S - se),
+                position = position_dodge(width=0.9), width = 0.25) +
+  scale_y_continuous(expand = c(0, 0), limits=c(0,950)) +
+  scale_fill_discrete(labels=c("Observed OTUs", "Chao1 Estimation"), name="OTU Counts") +
+  theme_bw()+
+  theme(legend.background = element_rect(colour = "black"), axis.text = blue.bold.italic.16.text, 
+        axis.title.x = red.bold.italic.text.x, axis.title.y = red.bold.italic.text.y) +
+  xlab("Sponge Species") +
+  ylab("OTU Richness")
+ggsave(g, file = "Obs_Est_OTUs.svg")
+```
+
+#3. Beta-diversity Analysis  
+###3a. **Figure 3** - Cluster dendrogram of Bray-Curtis Dissimilarity.
+
+```{r, eval=FALSE, warning=FALSE}
+#Bray-Curtis distance among samples
+ALG.bc.dist <- vegdist(ALG, method = "bray")
+#Test for differences in Bray-Curtis dissimilarity among host species
+braycurtis.adonis<-adonis(comm.bc.dist ~ SCIE_NAME, data = metadata, perm=1e3)
+#Cluster the communities using average-linkage algorithm
+ALG.bc.clust <- hclust(ALG.bc.dist, method = "average")
+
+##ALG_clean_names has sample names more perceptible
+ALG_clean_names <- read.table(file.choose(~Desktop/EMP12.v24_final/P1_forR.shared), header = TRUE, row.names = 1)
+
+png("BC_Dissimilarity.png", width=2200, height=1800, res=300)
+ALG.bc.dist_dendro <- vegdist(ALG_clean_names, method = "bray")
+ALG.bc.clust_dendro <- hclust(ALG.bc.dist_dendro, method = "average")
+# vector of colors labelColors = c('red', 'blue', 'darkgreen', 'darkgrey','purple')
+hcd = as.dendrogram(ALG.bc.clust_dendro)
+labelColors = c("#CDB380", "#036564", "#EB6841", "#EDC951")
+# cut dendrogram in 4 clusters
+clusMember = cutree(hcd, 4)
+# function to get color labels
+colLab <- function(n) {
+  if (is.leaf(n)) {
+    a <- attributes(n)
+    labCol <- labelColors[clusMember[which(names(clusMember) == a$label)]]
+    attr(n, "nodePar") <- c(a$nodePar, lab.col = labCol)
+  }
+  n
+}
+# using dendrapply
+clusDendro = dendrapply(hcd, colLab)
+# make plot
+plot(clusDendro, main = "Bray-Curtis Dissimilarity")
+dev.off()
+```
+
+###3b. **Figure 4** - Bray-Curtis nMDS plot.
+
+```{r, eval=FALSE, warning=FALSE}
+#MDS plot with Bray-Curtis distance
+ALG.bc.mds <- metaMDS(ALG, dist = "bray", k = 2, trymax = 50)
+
+#Customizing  MDS visualization
+svg("BC_nMDS.svg", width=10,height=7)
+ordiplot(ALG.bc.mds, type = "none")
+points(mds.fig, "sites", pch = 19, col = "dodgerblue", select = metadata$SCIE_NAME == "Cliona viridis")
+points(mds.fig, "sites", pch = 19, col = "cornflowerblue", select = metadata$SCIE_NAME == "Cliona celata complex")
+points(mds.fig, "sites", pch = 19, col = "cyan2", select = metadata$SCIE_NAME == "Phorbas fictitius")
+points(mds.fig, "sites", pch = 19, col = "darkcyan", select = metadata$SCIE_NAME == "Dysidea fragilis")
+ALG.bc.mds
+text(-5,2, "Stress = 0.1116067", cex = .9)
+ordiellipse(ALG.bc.mds, metadata$SCIE_NAME, conf = 0.95, label = TRUE)
+ordicluster(ALG.bc.mds, ALG.bc.clust, col = "gray")
+dev.off()
+
+# Assess goodness of ordination fit (stress plot), nonlinear fit
+ALG.anosim<-anosim(ALG, metadata$SCIE_NAME, distance ="bray")
+summary(ALG.anosim)
+```
+
+###3c. **Figure 5** - Heatmap for the 50 most abundant OTUs.
+
+```{r, eval=FALSE, warning=FALSE}
+#set color palette for heatmap
+ALG_palette <- brewer.pal(9, "YlOrRd")
+pal<-colorRampPalette(c("lightyellow", "lightgoldenrod1","goldenrod1","orange","indianred", "red"))(10)
+
+#Square- and Fourth-Root Transformation
+ALG_t <- as.data.frame(t(ALG_clean_names[,-1]))
+ALG_t<-ALG_t[order(rowSums(ALG_t),decreasing=T),]
+ALG_t<-as.data.frame(t(ALG_t))
+ALG.sqrt <- sqrt(ALG_t)
+ALG.ftrt <- sqrt(ALG.sqrt)
+
+##Get top 50 Otus in a heatmap
+ALG_t <- as.data.frame(t(ALG[,-1]))
+ALG_t<-ALG_t[order(rowSums(ALG_t),decreasing=T),]
+ALG_top50<-ALG_t[1:50,]
+ALG_top50_Sums<-as.data.frame(c(row.names(rownames(ALG_top50)), rowSums(ALG_top50)))
+ALG_top50_sqrt<-sqrt(ALG_top50)
+ALG_top50_ftrt<-sqrt(ALG_top50_sqrt)
+svg("top50_pheatmap.svg")
+pheatmap(ALG_top50_ftrt, color = pal, cluster_cols=T, cluster_rows=F,
+         show_rownames=T, show_colnames=T, clustering_method="single")
+dev.off()
+```
+
+#4. Supplementary Figure
+###4a. **Figure S2** - Stress plot for nMDS ordination.
+
+```{r, eval=FALSE, warning=FALSE}
+stressplot(ALG.bc.mds, pch=1, p.col="gray", lwd=2, l.col="red")
+```
+
