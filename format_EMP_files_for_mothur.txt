@@ -1,0 +1,27 @@
+##All the following commands run only in Ubuntu’s command line interface (CLI)
+
+#transpose EMP's OTU table
+make.table(shared=study1740...shared)
+
+#extract OTU size from transposed shared file
+cut -f2 study1740....transpd.shared > OTUsize.list
+
+#extract OTU_ID and GG_Tax from .database file
+cut -f 1,5 study1740....database > EMP_for_biom.database
+
+#insert OTUsize.list into .database
+paste OTUsize.list EMP_for_biom.database
+
+#Swap first two columns
+awk ' { t = $1; $1 = $2; $2 = t; print; } ' EMP12_Database_wOTUsize.database > EMP12.database
+
+#Replace spaces for tabs (or fix the previous command, I am not sure how to...)
+awk -v OFS="\t" '$1=$1' EMP12.database > EMP12_tab.database
+
+#Change required column labels (joe is a in-UbuntuCLI text editor/viewer)
+joe EMP12_tab.database edit ----> ^KX (joe command to save)
+
+#Change database name to include a .cons.taxonomy suffix
+#please check if while running filter.shared you requested makerare=f, as make.biom will not respond well to that
+#It is now possible to run mothur’s “make.biom” command
+#make.biom(shared=,constaxonomy=,metadata=)
